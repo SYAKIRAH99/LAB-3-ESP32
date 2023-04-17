@@ -1,0 +1,120 @@
+/*
+  Daniel Carrasco
+  This and more tutorials at https://www.electrosoftcloud.com/
+*/
+#include <esp_now.h>
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
+#include <ThingSpeak.h>
+static const char* ssid     = "LAB INOVASI_2.4G";
+static const char* password = "Ftkee@1000";
+
+String server = "http://maker.ifttt.com";
+String eventName = "LAB 3 ESP32";
+String IFTTT_Key = "brDXvzuQBdD8NTMlPgRodv";
+String IFTTTUrl="https://maker.ifttt.com/trigger/{event}/json/with/key/brDXvzuQBdD8NTMlPgRodv";
+
+float value1;
+float value2;
+
+unsigned long channelID = 2108034;
+const char* writeAPIKey = "MAYG6VTWGY7SXFQP";
+const char* servers = "api.thingspeak.com";
+// Structure to keep the temperature and humidity data
+// Is also required in the client to be able to save the data directly
+
+WiFiClient client;
+WiFiClientSecure clientSecure;
+
+typedef struct temp_humidity {
+  float temperature;
+  float humidity;
+};
+// Create a struct_message called myData
+temp_humidity dhtData;
+// callback function executed when data is received
+void OnRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+  memcpy(&dhtData, incomingData, sizeof(dhtData));
+  Serial.print("Bytes received: ");
+  Serial.println(len);
+  Serial.print("Temperature: ");
+  Serial.println(dhtData.temperature);
+  Serial.print("Humidity: ");
+  Serial.println(dhtData.humidity);
+}
+void setup() {
+  // Initialize Serial Monitor
+  Serial.begin(115200);
+  ThingSpeak.begin(client);
+  // Set device as a Wi-Fi Station
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.begin(ssid, password);
+   // Printout MAC address
+  //check wi-fi is connected to wi-fi network
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.print(".");
+  }
+ 
+   // Printout MAC address
+  Serial.println();
+  Serial.print("ESP Board MAC Address:  ");
+  Serial.println(WiFi.macAddress());
+
+  // Init ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("There was an error initializing ESP-NOW");
+    return;
+  }
+  
+  // Once the ESP-Now protocol is initialized, we will register the callback function
+  // to be able to react when a package arrives in near to real time without pooling every loop.
+  esp_now_register_recv_cb(OnRecv);
+}
+
+void sendDataToSheet(void)
+{
+  String url = server + "/trigger/" + eventName + "/with/key/" + IFTTT_Key + "?value1=" + String((int)value1) + "&value2="+String((int)value2);  
+  Serial.println(url);
+  //Start to send data to IFTTT
+  HTTPClient http;
+  Serial.print("[HTTP] begin...\n");
+  http.begin(url); //HTTP
+
+  Serial.print("[HTTP] GET...\n");
+  // start connection and send HTTP header
+  int httpCode = http.GET();
+  // httpCode will be negative on error
+  if(httpCode > 0) {
+    // HTTP header has been send and Server response header has been handled
+    Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+    // file found at server
+    if(httpCode == HTTP_CODE_OK) {
+      String payload = http.getString();
+      Serial.println(payload);
+    }
+  } else {
+    Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+  }
+  http.end();
+}
+
+void loop() {
+  float temperature = dhtData.temperature;
+  float humidity = dhtData.humidity;
+  ThingSpeak.setField(1, temperature);
+  ThingSpeak.setField(2, humidity);
+  int status = ThingSpeak.writeFields(channelID, writeAPIKey);
+  if (status == 200) {
+    Serial.println("Data sent to ThingSpeak successfully");
+  } else {
+    Serial.println("Failed to send data to ThingSpeak");
+  }
+  value1 = dhtData.temperature;
+  value2 = dhtData.humidity;
+  sendDataToSheet();
+  // Wait for 15 seconds before sending the next data to ThingSpeak
+  delay(15000);
+}
